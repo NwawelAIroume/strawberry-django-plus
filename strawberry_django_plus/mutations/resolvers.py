@@ -17,6 +17,7 @@ from typing import (
 )
 
 import strawberry
+from django.contrib.contenttypes.fields import GenericRelation
 from django.db import models, transaction
 from django.db.models.base import Model
 from django.db.models.fields.related import ManyToManyField
@@ -166,14 +167,20 @@ def parse_input(info: Info, data: Any):
     if isinstance(data, (ManyToOneInput, ManyToManyInput, ListInput)):
         d = getattr(data, "data", None)
         if dataclasses.is_dataclass(d):
-            d = {f.name: parse_input(info, getattr(data, f.name)) for f in dataclasses.fields(d)}
+            d = {
+                f.name: parse_input(info, getattr(data, f.name))
+                for f in dataclasses.fields(d)
+            }
         return ParsedObjectList(
             add=cast(List[_InputListTypes], parse_input(info, data.add)),
             remove=cast(List[_InputListTypes], parse_input(info, data.remove)),
             set=cast(List[_InputListTypes], parse_input(info, data.set)),
         )
     if dataclasses.is_dataclass(data):
-        return {f.name: parse_input(info, getattr(data, f.name)) for f in dataclasses.fields(data)}
+        return {
+            f.name: parse_input(info, getattr(data, f.name))
+            for f in dataclasses.fields(data)
+        }
 
     return data
 
@@ -281,7 +288,7 @@ def update(info, instance, data, *, full_clean: Union[bool, FullCleanOptions] = 
             files.append((field, value))
             continue
 
-        if isinstance(field, (ManyToManyField, ForeignObjectRel)):
+        if isinstance(field, (ManyToManyField, ForeignObjectRel, GenericRelation)):
             # m2m will be processed later
             m2m.append((field, value))
             continue
@@ -291,7 +298,9 @@ def update(info, instance, data, *, full_clean: Union[bool, FullCleanOptions] = 
             # We are using str here because strawberry.ID can't be used for isinstance
             (ParsedObject, str),
         ):
-            value, value_data = _parse_data(info, field.related_model, value)  # noqa: PLW2901
+            value, value_data = _parse_data(
+                info, field.related_model, value
+            )  # noqa: PLW2901
             # If value is None, that means we should create the model
             if value is None:
             	value = create(info,field.related_model,value_data,full_clean=full_clean) # noqa: PLW2901
@@ -362,7 +371,11 @@ def update_field(info: Info, instance: Model, field: models.Field, value: Any):
         return
 
     data = None
-    if value and isinstance(field, models.ForeignObject) and not isinstance(value, Model):
+    if (
+        value
+        and isinstance(field, models.ForeignObject)
+        and not isinstance(value, Model)
+    ):
         value, data = _parse_pk(value, field.related_model)
 
     field.save_form_data(instance, value)
@@ -395,7 +408,7 @@ def update_m2m(
         return
 
     use_remove = True
-    if isinstance(field, ManyToManyField):
+    if isinstance(field, (ManyToManyField, GenericRelation)):
         manager = cast("RelatedManager", getattr(instance, field.attname))
     else:
         assert isinstance(field, (ManyToManyRel, ManyToOneRel))
